@@ -28,6 +28,8 @@ const float meanVal       = 127.5;
 int mat_columns;
 int mat_rows;
 int length_to_mid;
+int pixal_to_bottom;
+int pixal_to_left;
 double alpha=0;
 
 double depth_length_coefficient(double depth){
@@ -146,6 +148,8 @@ int main(int argc, char** argv) try
     int magic_distance_flag = 1;
     string move_direction ;
     int last_frame_length = 50;
+    int last_frame_pixal = 480;
+    
     // int para1 = 200 ,para2 = 50;
 
      while (cvGetWindowHandle(window_name))
@@ -177,8 +181,8 @@ int main(int argc, char** argv) try
         auto depth_mat = depth_frame_to_meters(pipe, depth_frame);
         
         // imshow ("image_depth", depth_mat);
-        // Mat inputBlob = blobFromImage(color_mat, inScaleFactor,
-        //                               Size(inWidth, inHeight), meanVal, false); //Convert Mat to batch of images
+        Mat inputBlob = blobFromImage(color_mat, inScaleFactor,
+                                      Size(inWidth, inHeight), meanVal, false); //Convert Mat to batch of images
         
         
         Mat Gcolor_mat;
@@ -187,7 +191,7 @@ int main(int argc, char** argv) try
         // cout<<"time before Gaussian"<<1000.000*(end_time_1-start_time)/CLOCKS_PER_SEC<<std::endl;
         
         GaussianBlur(color_mat,Gcolor_mat,Size(11,11),0);
-        //GaussianBlur(depth_mat,depth_mat,Size(11,11),0);
+        //GaussianBlur(depth_mat,Gdepth_mat,Size(11,11),0);
         auto end_time_1 = clock();
         cout<<"time before MAT4 "<<1000.000*(end_time_1-start_time)/CLOCKS_PER_SEC<<std::endl;
 
@@ -199,6 +203,7 @@ int main(int argc, char** argv) try
         mat_rows = Gcolor_mat.rows;
         mat_columns =Gcolor_mat.cols;
         // cout<< mat_columns<< endl;
+        // cout<< mat_rows<< endl;
         Mat imgHSV;
         vector<Mat> hsvSplit;
         cvtColor(Gcolor_mat, imgHSV, COLOR_BGR2HSV); //Convert the captured frame from BGR to HSV
@@ -322,7 +327,10 @@ int main(int argc, char** argv) try
 
 
         // calculate length to midline
-        length_to_mid = (moment.m10 / moment.m00-160)*depth_length_coefficient(magic_distance)/320;
+        length_to_mid = (moment.m10 / moment.m00-200)*depth_length_coefficient(magic_distance)/320;
+        pixal_to_left = moment.m10 / moment.m00;
+        pixal_to_bottom = (480-moment.m01 / moment.m00);
+        cout <<"pixal_to_bottom ="<<pixal_to_bottom<<"    ";
         cout << endl<<"length to midline ="<<length_to_mid<<"    ";
         if (magic_distance_flag ==1 && abs(length_to_mid) == 0){
             first_magic_distance = magic_distance;
@@ -366,21 +374,51 @@ int main(int argc, char** argv) try
         // last_y_meter = this_y_meter;
         // cout<<"  first_magic_distance ="<<first_magic_distance<<endl;
         // cout<<"  move distance ="<<move_distance<<endl;
-        cout<<"time in a while"<<1000.000*(end_time-start_time)/CLOCKS_PER_SEC<<endl;
 
         // rotate the robot
-        if (length_to_mid < -100 && last_frame_length > 0){
-            ZActionModule::instance()->sendPacket(2, 0, 0, -1*length_to_mid);
-		    std::this_thread::sleep_for(std::chrono::milliseconds(5));  
+        cout<<"last pixal bottom    "<< last_frame_pixal<<endl;
+        cout<<"last frame length    "<< last_frame_length<<endl;
+        cout<<"pixal to left        "<< pixal_to_left<<endl;
+        if (pixal_to_bottom == 480 && last_frame_pixal<100){
+            ZActionModule::instance()->sendPacket(2, 10, 0, 0, true);
+		    std::this_thread::sleep_for(std::chrono::milliseconds(5)); 
+            cout<<"0"<<endl;
         }
         else{
-        ZActionModule::instance()->sendPacket(2, 0, 0, 1*length_to_mid);
-		std::this_thread::sleep_for(std::chrono::milliseconds(5));                
-        cout<<"time in a while"<<1000.000*(end_time-start_time)/CLOCKS_PER_SEC<<endl;
-        last_frame_length = length_to_mid;
+            if (pixal_to_left == 0 && last_frame_length > 0){
+                ZActionModule::instance()->sendPacket(2, 0, 0, 30);
+		        std::this_thread::sleep_for(std::chrono::milliseconds(5));  
+                cout<<"1"<<endl;
+            }
+            else if(pixal_to_left == 0 && last_frame_length < 0){
+                ZActionModule::instance()->sendPacket(2, 0, 0, -30);
+		        std::this_thread::sleep_for(std::chrono::milliseconds(5)); 
+                cout<<"2"<<endl;
+            }
+            else{
+                int flag = 1;
+                if(length_to_mid >0){
+                    flag = 1;
+                }
+                else if(length_to_mid < 0){
+                    flag = -1;
+                }
+                else{
+                    flag = 0;
+                }
+                ZActionModule::instance()->sendPacket(2, 50, 0, 1*length_to_mid+flag*5);
+		        std::this_thread::sleep_for(std::chrono::milliseconds(5));                
+                last_frame_length = length_to_mid;
+                last_frame_pixal = pixal_to_bottom;
+                cout<<"3"<<endl;
+            }
         }
-        cout<<"time in a while"<<1000.000*(end_time-start_time)/CLOCKS_PER_SEC<<endl;
-        
+
+      
+
+
+
+            cout<<"time in a while"<<1000.000*(end_time-start_time)/CLOCKS_PER_SEC<<endl;
     }
     
     // double dmean = 0;

@@ -24,7 +24,7 @@ void ActionModule::sendStartPacket() {
 	sendSocket.writeDatagram(startPacketSend, TRANSMIT_START_PACKET_SIZE, QHostAddress(radioSendAddress), PORT);
 }
 
-void ActionModule::sendPacket(quint8 id, qint16 vx, qint16 vy, qint16 vr) {
+void ActionModule::sendPacket(quint8 id, qint16 vx, qint16 vy, qint16 vr, bool is_dribble) {
 	int num = 0;
 	qint16 abs_vx = std::abs(vx);
 	qint16 abs_vy = std::abs(vy);
@@ -34,7 +34,7 @@ void ActionModule::sendPacket(quint8 id, qint16 vx, qint16 vy, qint16 vr) {
 	bool kick = 0;
 	quint8 power = 0;
 	// dribble -1 ~ +1 -> -3 ~ +3
-	qint8 dribble = 0;
+	qint8 dribble = is_dribble ? 3:0;
 	tx[0] = (tx[0]) | (1 << (3 - num));
 	tx[num * 4 + 1] = ((quint8)kick << 6) | dribble << 4 | id;
 	tx[num * 4 + 2] = (vx >> 8 & 0x80) | (abs_vx & 0x7f);
