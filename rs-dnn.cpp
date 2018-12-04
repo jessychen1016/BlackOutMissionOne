@@ -16,6 +16,7 @@
 #include "time.h"
 #include <chrono>
 #include <thread>
+#include <atomic>
 #include <actionmodule.h>
 
 
@@ -31,6 +32,11 @@ int length_to_mid;
 int pixal_to_bottom;
 int pixal_to_left;
 double alpha=0;
+using namespace cv;
+using namespace cv::dnn;
+using namespace rs2;
+using namespace std;
+using namespace rs400;
 
 double depth_length_coefficient(double depth){
     
@@ -39,11 +45,7 @@ double depth_length_coefficient(double depth){
     return length;
 
 }
-    using namespace cv;
-    using namespace cv::dnn;
-    using namespace rs2;
-    using namespace std;
-    using namespace rs400;
+    
 
 int main(int argc, char** argv) try
 {
@@ -149,37 +151,64 @@ int main(int argc, char** argv) try
     string move_direction ;
     int last_frame_length = 50;
     int last_frame_pixal = 480;
-    
+    // Declaring two concurrent queues that will be used to push and pop frames from different threads
+    rs2::frame_queue depth_data;
+    rs2::frame_queue color_data;
     // int para1 = 200 ,para2 = 50;
 
+    // Atomic boolean to allow thread safe way to stop the thread
+    std::atomic_bool stopped(false);
+
+     // Create a thread for getting frames from the device and process them
+    // to prevent UI thread from blocking due to long computations.
+    std::thread processing_thread([&]() {
+        while (!stopped) //While application is running
+        {
+            rs2::frameset data = pipe.wait_for_frames(); // Wait for next set of frames from the camera
+            
+            // Make sure the frames are spatially aligned
+            data = align_to.process(data);
+
+            auto color_frame = data.get_color_frame();
+            auto depth_frame = data.get_depth_frame();
+            if (!depth_frame) // Should not happen but if the pipeline is configured differently
+                return;       //  it might not provide depth and we don't want to crash
+            static int last_frame_number = 0;
+            if (color_frame.get_frame_number() == last_frame_number) continue;
+            last_frame_number = color_frame.get_frame_number();
+            // Push filtered & original data to their respective queues
+            // Note, pushing to two different queues might cause the application to display
+            //  original and filtered pointclouds from different depth frames
+            //  To make sure they are synchronized you need to push them together or add some
+            //  synchronization mechanisms
+            depth_data.enqueue(depth_frame);
+            color_data.enqueue(color_frame);
+        }
+    });
+
+    rs2::frame depth_frame;
+    rs2::frame color_frame;
      while (cvGetWindowHandle(window_name))
     // for(int i = 0; i<60 && cvGetWindowHandle(window_name) ; i++)
     {
         auto start_time = clock();
         // Wait for the next set of frames
         // need to modify
-        auto data = pipe.wait_for_frames();
-        // auto end_time_1 = clock();
-        // cout<<"time before MAT1 "<<1000.000*(end_time_1-start_time)/CLOCKS_PER_SEC<<std::endl;
-
-        // Make sure the frames are spatially aligned
-        data = align_to.process(data);
-
-        
-        auto color_frame = data.get_color_frame();
-        auto depth_frame = data.get_depth_frame();
-
+        if (!depth_data.poll_for_frame(&depth_frame) || !color_data.poll_for_frame(&color_frame))
+        continue;
+       
+        auto end_time_1 = clock();
+        cout<<"time for recieving "<<1000.000*(end_time_1-start_time)/CLOCKS_PER_SEC<<std::endl;
         
         // If we only received new depth frame, 
         // but the color did not update, continue
-        static int last_frame_number = 0;
-        if (color_frame.get_frame_number() == last_frame_number) continue;
-        last_frame_number = color_frame.get_frame_number();
         // Convert RealSense frame to OpenCV matrix:
         auto color_mat = frame_to_mat(color_frame);
         // imshow ("image", color_mat);
         auto depth_mat = depth_frame_to_meters(pipe, depth_frame);
-        
+
+        auto end_time_2 = clock();
+        cout<<"time before Gauss "<<1000.000*(end_time_2-start_time)/CLOCKS_PER_SEC<<std::endl;
         // imshow ("image_depth", depth_mat);
         Mat inputBlob = blobFromImage(color_mat, inScaleFactor,
                                       Size(inWidth, inHeight), meanVal, false); //Convert Mat to batch of images
@@ -192,16 +221,18 @@ int main(int argc, char** argv) try
         
         GaussianBlur(color_mat,Gcolor_mat,Size(11,11),0);
         //GaussianBlur(depth_mat,Gdepth_mat,Size(11,11),0);
-        auto end_time_1 = clock();
-        cout<<"time before MAT4 "<<1000.000*(end_time_1-start_time)/CLOCKS_PER_SEC<<std::endl;
+
 
         // Crop both color and depth frames
         Gcolor_mat = Gcolor_mat(crop);
         depth_mat = depth_mat(crop);
 
+
+        auto end_time_3 = clock();
+        cout<<"time before HSV "<<1000.000*(end_time_3-start_time)/CLOCKS_PER_SEC<<std::endl;
          //start of mod
-        mat_rows = Gcolor_mat.rows;
-        mat_columns =Gcolor_mat.cols;
+        // mat_rows = Gcolor_mat.rows;
+        // mat_columns =Gcolor_mat.cols;
         // cout<< mat_columns<< endl;
         // cout<< mat_rows<< endl;
         Mat imgHSV;
@@ -222,14 +253,12 @@ int main(int argc, char** argv) try
     
         //闭操作 (连接一些连通域)
         morphologyEx(imgThresholded, imgThresholded, MORPH_CLOSE, element);
-    auto end_time_2 = clock();
-        cout<<"time before MAT5 "<<1000.000*(end_time_2-start_time)/CLOCKS_PER_SEC<<std::endl;
+        auto end_time_4 = clock();
+        cout<<"time before contour "<<1000.000*(end_time_4-start_time)/CLOCKS_PER_SEC<<std::endl;
         // imshow("Thresholded Image", imgThresholded); //show the thresholded image
     //   imshow("Original", Gcolor_mat); //show the original image
     
         char key = (char) waitKey(1);
-        // auto end_time_1 = clock();
-        // cout<<"time before contour"<<1000.000*(end_time_1-start_time)/CLOCKS_PER_SEC<<std::endl;
         //end of mod
     //    vector<Vec3f> circles;
     //    HoughCircles(imgThresholded,circles,CV_HOUGH_GRADIENT,1,1000,para1,para2,0,1000);
@@ -330,7 +359,7 @@ int main(int argc, char** argv) try
         length_to_mid = (moment.m10 / moment.m00-200)*depth_length_coefficient(magic_distance)/320;
         pixal_to_left = moment.m10 / moment.m00;
         pixal_to_bottom = (480-moment.m01 / moment.m00);
-        cout <<"pixal_to_bottom ="<<pixal_to_bottom<<"    ";
+        // cout <<"pixal_to_bottom ="<<pixal_to_bottom<<"    ";
         cout << endl<<"length to midline ="<<length_to_mid<<"    ";
         if (magic_distance_flag ==1 && abs(length_to_mid) == 0){
             first_magic_distance = magic_distance;
@@ -343,7 +372,7 @@ int main(int argc, char** argv) try
         // imshow("heatmap", depth_mat);
         this_x_meter = magic_distance;
         this_y_meter = abs(length_to_mid);
-        auto end_time = clock();
+
         // x_vel = (this_x_meter - last_x_meter)/(end_time-start_time)*CLOCKS_PER_SEC;
         // std::cout<<1000.000*(end_time-start_time)/CLOCKS_PER_SEC<<std::endl;
         // cout<<"velocity = "<<x_vel<<"       ";
@@ -376,23 +405,23 @@ int main(int argc, char** argv) try
         // cout<<"  move distance ="<<move_distance<<endl;
 
         // rotate the robot
-        cout<<"last pixal bottom    "<< last_frame_pixal<<endl;
-        cout<<"last frame length    "<< last_frame_length<<endl;
-        cout<<"pixal to left        "<< pixal_to_left<<endl;
+        // cout<<"last pixal bottom    "<< last_frame_pixal<<endl;
+        // cout<<"last frame length    "<< last_frame_length<<endl;
+        // cout<<"pixal to left        "<< pixal_to_left<<endl;
         if (pixal_to_bottom == 480 && last_frame_pixal<100){
             ZActionModule::instance()->sendPacket(2, 10, 0, 0, true);
-		    std::this_thread::sleep_for(std::chrono::milliseconds(5)); 
+		    std::this_thread::sleep_for(std::chrono::milliseconds(1)); 
             cout<<"0"<<endl;
         }
         else{
             if (pixal_to_left == 0 && last_frame_length > 0){
                 ZActionModule::instance()->sendPacket(2, 0, 0, 30);
-		        std::this_thread::sleep_for(std::chrono::milliseconds(5));  
+		        std::this_thread::sleep_for(std::chrono::milliseconds(1));  
                 cout<<"1"<<endl;
             }
             else if(pixal_to_left == 0 && last_frame_length < 0){
                 ZActionModule::instance()->sendPacket(2, 0, 0, -30);
-		        std::this_thread::sleep_for(std::chrono::milliseconds(5)); 
+		        std::this_thread::sleep_for(std::chrono::milliseconds(1)); 
                 cout<<"2"<<endl;
             }
             else{
@@ -407,17 +436,13 @@ int main(int argc, char** argv) try
                     flag = 0;
                 }
                 ZActionModule::instance()->sendPacket(2, 50, 0, 1*length_to_mid+flag*5);
-		        std::this_thread::sleep_for(std::chrono::milliseconds(5));                
+		        std::this_thread::sleep_for(std::chrono::milliseconds(1));                
                 last_frame_length = length_to_mid;
                 last_frame_pixal = pixal_to_bottom;
                 cout<<"3"<<endl;
             }
         }
-
-      
-
-
-
+            auto end_time = clock();
             cout<<"time in a while"<<1000.000*(end_time-start_time)/CLOCKS_PER_SEC<<endl;
     }
     
@@ -437,6 +462,8 @@ int main(int argc, char** argv) try
     // dvariance /= 29;
 
     // std::cout << dmean << ",      "<< sqrt(dvariance) << std::endl;  
+    stopped = true;
+    processing_thread.join();
     return EXIT_SUCCESS;
 }
 catch (const rs2::error & e)
