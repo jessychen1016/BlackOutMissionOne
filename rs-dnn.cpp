@@ -14,6 +14,7 @@
 #include <thread>
 #include <chrono>
 #include <mutex>
+#include <Semaphore.h>
 
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
@@ -26,6 +27,9 @@ using namespace rs400;
 using namespace rs2;
 using namespace std;
 using namespace cv;
+
+Semaphore get_video_to_frame_transfer(0);
+Semaphore frame_transfer_to_mean(0);
 
 const size_t inWidth = 600;
 const size_t inHeight = 900;
@@ -53,16 +57,15 @@ string move_direction;
 int last_frame_length = 50;
 int last_frame_pixal = 480;
 
-
-rs2_stream find_stream_to_align(const std::vector<rs2::stream_profile>& streams);
-
+std::chrono::milliseconds dura(100);
+clock_t time0, time1, time2, end1, end2;
 double depth_length_coefficient(double depth) {
 	double length;
 	length = 48.033*depth + 5.4556;
 	return length;
 }
 
-//mutex mtx;
+mutex mtx1, mtx2;
 
 template <typename T>
 void change(T *p, T *q) {
@@ -74,20 +77,42 @@ void change(T *p, T *q) {
 
 void get_video(rs2::pipeline &pipe, rs2::frameset *latest_frameset, rs2::frameset *new_frameset) {
 	while (true) {
+        time1 = clock();
 		*new_frameset = pipe.wait_for_frames();
 		change(latest_frameset, new_frameset);
+        end1 = clock();
+        cout << "Thread1   " << 1000 * (end1 - time1)/ CLOCKS_PER_SEC << endl;
+        get_video_to_frame_transfer.Signal();
+
 	}
 }
 
-void frame_transfer(rs2::align &align, rs2::pipeline &pipe, rs2::frameset *latest_frameset, Mat *pt_color_mat, Mat *pt_new_color_mat, Mat *pt_depth_mat, Mat *pt_new_depth_mat) {
-	auto processed = align.process(*latest_frameset);
-	rs2::video_frame color_frame = processed.get_color_frame();
-	rs2::depth_frame depth_frame = processed.get_depth_frame();
-	*pt_new_color_mat = frame_to_mat(color_frame);
-	*pt_new_depth_mat = depth_frame_to_meters(pipe, depth_frame);
-	change(pt_color_mat, pt_new_color_mat);
-	change(pt_depth_mat, pt_new_depth_mat);
+void frame_transfer(rs2::align &align_to, rs2::pipeline &pipe, rs2::frameset *latest_frameset, Mat *pt_color_mat, Mat *pt_new_color_mat, Mat *pt_depth_mat, Mat *pt_new_depth_mat) {
+	while (true){
+        time2 = clock();
+        get_video_to_frame_transfer.Wait();
+        auto processed = align_to.process(*latest_frameset);
+        rs2::video_frame color_frame = processed.get_color_frame();
+        rs2::depth_frame depth_frame = processed.get_depth_frame();
+        *pt_new_color_mat = frame_to_mat(color_frame);
+        *pt_new_depth_mat = depth_frame_to_meters(pipe, depth_frame);
+        // cvtColor(*pt_new_color_mat, *pt_new_color_mat, COLOR_RGB2BGR);
+        // std::chrono::milliseconds dura2(1000);
+        // std::this_thread::sleep_for(dura2);
+        change(pt_color_mat, pt_new_color_mat);
+        change(pt_depth_mat, pt_new_depth_mat);
+        frame_transfer_to_mean.Signal();
+        end2 = clock();
+        cout << "Thread2   " << 1000 * (end2 - time2) / CLOCKS_PER_SEC << endl;
+    }
 }
+
+// void gaussianblur(Mat *pt_normal_color_mat, Mat *pt_G_color_mat, Mat *pt_G_latest_color_mat){
+//     while (true){
+//         GaussianBlur(*pt_normal_color_mat, *pt_G_color_mat, Size(11, 11), 0);
+//         change(pt_G_color_mat, pt_G_latest_color_mat);
+//     }
+// }
 
 int main(int argc, char * argv[]) try{
 	context ctx;
@@ -111,7 +136,7 @@ int main(int argc, char * argv[]) try{
 		return EXIT_FAILURE;
 	}
 
-	clock_t time, time2, time3;
+
 
     // Create a pipeline to easily configure and start the camera
     rs2::pipeline pipe;
@@ -119,6 +144,7 @@ int main(int argc, char * argv[]) try{
     // with its default streams.
     //The start function returns the pipeline profile which the pipeline used to start the device
     rs2::pipeline_profile profile = pipe.start();
+    rs2::align align_to(RS2_STREAM_COLOR);
 	////////////////////////
 	auto config_profile = profile.get_stream(RS2_STREAM_COLOR).as<video_stream_profile>();
 	Size cropSize;
@@ -167,12 +193,12 @@ int main(int argc, char * argv[]) try{
 	/////////////////////
     //Pipeline could choose a device that does not have a color stream
     //If there is no color stream, choose to align depth to another stream
-    rs2_stream align_to = find_stream_to_align(profile.get_streams());
+    // rs2_stream align_to = find_stream_to_align(profile.get_streams());
 
     // Create a rs2::align object.
     // rs2::align allows us to perform alignment of depth frames to others frames
     //The "align_to" is the stream type to which we plan to align depth frames.
-    rs2::align align(align_to);
+    // rs2::align align(align_to);
 
     // Define a variable for controlling the distance to clip
     float depth_clipping_distance = 1.f;
@@ -180,13 +206,15 @@ int main(int argc, char * argv[]) try{
     rs2::frameset new_frameset, latest_frameset;
 	new_frameset = latest_frameset = pipe.wait_for_frames();
 
-    std::thread t ([&]() {get_video(pipe, &latest_frameset, &new_frameset);});
-    t.detach();
+    std::thread t1 ([&]() {
+        get_video(pipe, &latest_frameset, &new_frameset);
+    });
+    
 
-	std::chrono::milliseconds dura(100);
+
 	std::this_thread::sleep_for(dura);
 
-	auto processed = align.process(latest_frameset);
+	auto processed = align_to.process(latest_frameset);
 	rs2::video_frame color_frame = processed.get_color_frame();
 	rs2::depth_frame depth_frame = processed.get_depth_frame();
 	Mat latest_color_mat = frame_to_mat(color_frame);
@@ -194,18 +222,33 @@ int main(int argc, char * argv[]) try{
 	Mat new_color_mat = latest_color_mat;
 	Mat new_depth_mat = latest_depth_mat;
 
-	std::thread t2([&]() {frame_transfer(align, pipe, &latest_frameset, &latest_color_mat, &new_color_mat, &latest_depth_mat,&new_depth_mat);});
-	t2.detach();
+	std::thread t2([&]() {
+        frame_transfer(align_to, pipe, &latest_frameset, &latest_color_mat, &new_color_mat, &latest_depth_mat, &new_depth_mat);
+     });
+	
+    // Mat new_Gcolor_mat = latest_color_mat;
+    // Mat Gcolor_mat = latest_color_mat;
+    // std::this_thread::sleep_for(dura);
+
+    // std::thread t3([&]() {
+    //     // time3 = clock();
+    //     // cout<< "00000000"<<endl;
+    //     gaussianblur(&latest_color_mat, &new_Gcolor_mat, &Gcolor_mat);
+    //     // end3 = clock();
+    //     // cout << "Thread3   " << 1000 * ((double)(end3 - time3)) / CLOCKS_PER_SEC << endl;
+    //     // cout<< "55555555"<<endl;
+    // });
+    // t3.detach();
 	std::this_thread::sleep_for(dura);
-
+    // std::chrono::milliseconds dura2(1000);
+    // std::this_thread::sleep_for(dura2);
     while (cvGetWindowHandle(window_name)){ // Application still alive?
-		time = clock();
-
+		time0 = clock();
+        frame_transfer_to_mean.Wait(); 
 		Mat Gcolor_mat;
 		GaussianBlur(latest_color_mat, Gcolor_mat, Size(11, 11), 0);
-		cvtColor(Gcolor_mat, Gcolor_mat, COLOR_BGR2RGB);
-		//imshow(window_name, Gcolor_mat);
-
+        // cvtColor(Gcolor_mat, Gcolor_mat, COLOR_RGB2BGR);
+		// imshow(window_name, Gcolor_mat);
 		Gcolor_mat = Gcolor_mat(crop);
 		auto depth_mat2 = latest_depth_mat(crop);
 		Mat imgHSV;
@@ -313,9 +356,11 @@ int main(int argc, char * argv[]) try{
 			}
 		}
 		//waitKey(3);
-		cout << "All   " << 1000 * ((double)(clock() - time)) / CLOCKS_PER_SEC << endl;
+		cout << "All   " << 1000 * ((double)(clock() - time0)) / CLOCKS_PER_SEC << endl;
 
 	}//end of while
+    t1.detach();
+    t2.detach();
     return EXIT_SUCCESS;
 }
 catch (const rs2::error & e)
@@ -327,36 +372,4 @@ catch (const std::exception & e)
 {
     std::cerr << e.what() << std::endl;
     return EXIT_FAILURE;
-}
-
-rs2_stream find_stream_to_align(const std::vector<rs2::stream_profile>& streams)
-{
-    //Given a vector of streams, we try to find a depth stream and another stream to align depth with.
-    //We prioritize color streams to make the view look better.
-    //If color is not available, we take another stream that (other than depth)
-    rs2_stream align_to = RS2_STREAM_ANY;
-    bool depth_stream_found = false;
-    bool color_stream_found = false;
-    for (rs2::stream_profile sp : streams){
-        rs2_stream profile_stream = sp.stream_type();
-        if (profile_stream != RS2_STREAM_DEPTH){
-            if (!color_stream_found)         //Prefer color
-                align_to = profile_stream;
-
-            if (profile_stream == RS2_STREAM_COLOR){
-                color_stream_found = true;
-            }
-        }
-        else{
-            depth_stream_found = true;
-        }
-    }
-
-    if(!depth_stream_found)
-        throw std::runtime_error("No Depth stream available");
-
-    if (align_to == RS2_STREAM_ANY)
-        throw std::runtime_error("No stream found to align with Depth");
-
-    return align_to;
 }
