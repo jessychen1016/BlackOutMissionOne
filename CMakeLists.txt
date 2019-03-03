@@ -38,7 +38,7 @@ set(DEPENDENCIES realsense2 ${OpenCV_LIBS}
                 /usr/lib/x86_64-linux-gnu/libGLEW.so )
 
 add_executable(${projectname}            
-               rs-dnn.cpp
+               rs-dnnSingleThread.cpp
                cv-helpers.hpp
                include/actionmodule.cpp)
 target_link_libraries(${projectname} ${DEPENDENCIES}
