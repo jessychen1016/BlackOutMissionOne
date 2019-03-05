@@ -12,6 +12,13 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pthread")
 
 include(CheckCXXCompilerFlag)
 
+set(CMAKE_AUTOMOC ON)
+
+set(CMAKE_AUTOUIC ON)
+
+set(CMAKE_AUTORCC ON)
+
+
 CHECK_CXX_COMPILER_FLAG("-std=c++11" COMPILER_SUPPORTS_CXX11)
 CHECK_CXX_COMPILER_FLAG("-std=c++0x" COMPILER_SUPPORTS_CXX0X)
 # if(COMPILER_SUPPORTS_CXX11)
@@ -27,7 +34,7 @@ find_package(OpenCV REQUIRED)
 
 find_package(Qt5Core REQUIRED)
 find_package(Qt5Network REQUIRED)
-
+find_package(Qt5 REQUIRED Widgets)
 
 set(DEPENDENCIES realsense2 ${OpenCV_LIBS}
                  /home/jessy/librealsense/wrappers/librealsense2.so

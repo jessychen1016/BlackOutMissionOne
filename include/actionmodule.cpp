@@ -1,20 +1,33 @@
 #include "actionmodule.h"
+#include <QDebug>
+
 
 namespace {
 	const int TRANSMIT_PACKET_SIZE = 25;
+	const int TRANS_FEEDBACK_SIZE = 26;
+	const int PORT = 1030;
 	const int TRANSMIT_START_PACKET_SIZE = 6;
 	const QString radioSendAddress = QString("10.12.225.78");
-	const int PORT = 1030;
+	const QString radioReceiveAddress = QString("10.12.225.79");
 }
 
-ActionModule::ActionModule() {
-	tx.resize(TRANSMIT_PACKET_SIZE);
-	tx[0] = 0x40;
+ActionModule::ActionModule(QObject *parent) : QObject(parent) {
+    tx.resize(TRANSMIT_PACKET_SIZE);
+    tx[0] = 0x40;
+    QObject::connect(&receiveSocket, SIGNAL(readyRead()), this, SLOT(readData()), Qt::DirectConnection);
+    receiveSocket.bind(QHostAddress::AnyIPv4, PORT, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint);
 	sendStartPacket();
 }
 
+ActionModule::~ActionModule() {
+   //sendSocket.disconnectFromHost();
+    //receiveSocket.disconnectFromHost();
+}
+
+
 void ActionModule::sendStartPacket() {
 	QByteArray startPacketSend(TRANSMIT_START_PACKET_SIZE, 0);
+	QByteArray startPacketReceive(TRANSMIT_START_PACKET_SIZE, 0);
 	startPacketSend[0] = (char)0xf0;
 	startPacketSend[1] = (char)0x5a;
 	startPacketSend[2] = (char)0x5a;
@@ -22,6 +35,34 @@ void ActionModule::sendStartPacket() {
 	startPacketSend[4] = (char)0x01;
 	startPacketSend[5] = (char)0xa6;
 	sendSocket.writeDatagram(startPacketSend, TRANSMIT_START_PACKET_SIZE, QHostAddress(radioSendAddress), PORT);
+	receiveSocket.writeDatagram(startPacketReceive, TRANSMIT_START_PACKET_SIZE, QHostAddress(radioReceiveAddress), PORT);
+}
+
+void ActionModule::readData() {
+	qDebug() << "bangbingbangbing" << bool(receiveSocket.state() == QUdpSocket::BoundState);
+	qDebug() << "shujushujushujushuju" << bool(receiveSocket.hasPendingDatagrams());
+    while (receiveSocket.state() == QUdpSocket::BoundState && receiveSocket.hasPendingDatagrams()) {
+//        msgInfo->setInfo(newInfo);
+		qDebug() << "hahahahahahahahahaha";
+        rx.resize(receiveSocket.pendingDatagramSize());
+        receiveSocket.readDatagram(rx.data(), rx.size());
+        auto& data = rx;
+        short wheelVel[4] = {0};
+
+		if(data[0] == (char)0xff && data[1] == (char)0x02  ) {
+			qDebug() << "hohohohohohoho"<< (quint8)data[2];
+			if(id == (quint8)data[2]){
+				qDebug() << "hihihihihihihi";
+				infrared = bool((quint8)data[3] & 0x40);
+				wheelVel[0] = (quint16)(data[6] << 8) + data[7];
+				wheelVel[1] = 1 + (short)~(data[8] << 8) + data[9];
+				wheelVel[2] = 1 + (short)~(data[10] << 8) + data[11];
+				wheelVel[3] = (quint16)(data[12] << 8) + data[13];
+			}
+            
+
+        }
+    }
 }
 
 void ActionModule::sendPacket(quint8 id, qint16 vx, qint16 vy, qint16 vr, bool is_dribble) {

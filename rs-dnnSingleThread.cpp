@@ -161,6 +161,18 @@ int main(int argc, char * argv[]) try{
 
  
     while (cvGetWindowHandle(window_name)){ // Application still alive?
+
+		// make sure the ball is not in mouth
+		ZActionModule::instance()->readData();
+		if (ZActionModule::instance()->getInfrared()){
+			for (int i = 0; i <=100; i++){
+			ZActionModule::instance()->sendPacket(2, 0, 0, 0, true);
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			cout << "888888888888888888888888888"<< endl;
+			}
+			break;
+		}
+
 		time0 = clock();
         auto start_time = clock();
         // Wait for the next set of frames
@@ -313,6 +325,18 @@ int main(int argc, char * argv[]) try{
 	}//end of while
 	// second while for catching the stationary ball
 	 while (cvGetWindowHandle(window_name)){ // Application still alive?
+
+	//  make sure the ball is not in mouth
+		ZActionModule::instance()->readData();
+		if (ZActionModule::instance()->getInfrared()){
+			for (int i = 0; i <=100; i++){
+			ZActionModule::instance()->sendPacket(2, 0, 0, 0, true);
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			cout << "999999999999999999999999999999"<< endl;
+			}
+			
+			break;
+		}
 		time0 = clock();
         auto start_time = clock();
         // auto start_time_1 = clock();
